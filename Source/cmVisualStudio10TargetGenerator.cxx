@@ -2906,6 +2906,8 @@ void cmVisualStudio10TargetGenerator::WriteClOptions(
     const char* toolset = this->GlobalGenerator->GetPlatformToolset();
     if (toolset && clangToolset.find(toolset)) {
       e2.Element("ObjectFileName", "$(IntDir)%(filename).obj");
+    } else if (toolset && (strcmp(toolset, "Ggp_Clang") == 0)) {
+      // Use the VS extension's default for ObjectFileName
     } else {
       e2.Element("ObjectFileName", "$(IntDir)");
     }
@@ -3854,6 +3856,8 @@ void cmVisualStudio10TargetGenerator::AddLibraries(
   const cmComputeLinkInformation& cli, std::vector<std::string>& libVec,
   std::vector<std::string>& vsTargetVec, const std::string& config)
 {
+  const char* toolset = this->GlobalGenerator->GetPlatformToolset();
+  bool isGgpClang = toolset && (strcmp(toolset, "Ggp_Clang") == 0);
   using ItemVector = cmComputeLinkInformation::ItemVector;
   ItemVector const& libs = cli.GetItems();
   std::string currentBinDir =
@@ -3901,6 +3905,10 @@ void cmVisualStudio10TargetGenerator::AddLibraries(
     if (l.IsPath) {
       std::string path = this->LocalGenerator->MaybeConvertToRelativePath(
         currentBinDir, l.Value);
+      // Don't use relative paths with the GGP compiler.
+      if (isGgpClang) {
+        path = l.Value;
+      }
       ConvertToWindowsSlash(path);
       if (cmVS10IsTargetsFile(l.Value)) {
         vsTargetVec.push_back(path);
@@ -3908,8 +3916,15 @@ void cmVisualStudio10TargetGenerator::AddLibraries(
         libVec.push_back(path);
       }
     } else if (!l.Target ||
-               l.Target->GetType() != cmStateEnums::INTERFACE_LIBRARY) {
-      libVec.push_back(l.Value);
+               l.Target->GetType() != cmStateEnums::INTERFACE_LIBRARY) {      
+      // If the option starts with "-l" then remove that and put the string in
+      // the format "libfoo.so". GGP clang automatically add "-l" and requires
+      // this format
+      if (isGgpClang && l.Value.find("-l") == 0) {
+        libVec.push_back("lib" + l.Value.substr(2) + ".so");
+      } else {
+        libVec.push_back(l.Value);
+      }
     }
   }
 }
